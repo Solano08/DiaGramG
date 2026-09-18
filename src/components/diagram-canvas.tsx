@@ -26,7 +26,7 @@ import {
 } from "@/lib/graph-flow";
 import { toFlow, type FlowNode, type NodeEmphasis } from "@/lib/to-flow";
 import { nodeTypes } from "./diagram-nodes";
-import { edgeTypes } from "./routed-edge";
+import { EdgeLabelEditContext, edgeTypes } from "./routed-edge";
 
 const defaultEdgeOptions = { type: "routed" as const };
 
@@ -40,6 +40,7 @@ function CanvasInner({
   onSelect,
   onPresentStep,
   onMove,
+  onMoveLabel,
   onConnectNodes,
   onDeleteNodes,
   onDeleteEdges,
@@ -54,6 +55,7 @@ function CanvasInner({
   onSelect: (id: string | null) => void;
   onPresentStep: (index: number) => void;
   onMove: (positions: Map<string, { x: number; y: number }>) => void;
+  onMoveLabel: (edgeId: string, labelT: number) => void;
   onConnectNodes: (
     source: string,
     target: string,
@@ -225,8 +227,14 @@ function CanvasInner({
     return edges.map((edge) => styleEdge(edge, { presenting, path, reveal }));
   }, [edges, overview, path, presenting, reveal]);
 
+  const labelEdit = useMemo(
+    () => ({ editable: !presenting, onLabelT: onMoveLabel }),
+    [onMoveLabel, presenting],
+  );
+
   return (
-    <ReactFlow
+    <EdgeLabelEditContext.Provider value={labelEdit}>
+      <ReactFlow
       nodes={painted}
       edges={paintedEdges}
       onNodesChange={onNodesChange}
@@ -307,6 +315,7 @@ function CanvasInner({
         maskColor="rgba(244,239,230,0.7)"
       />
     </ReactFlow>
+    </EdgeLabelEditContext.Provider>
   );
 }
 
@@ -415,6 +424,7 @@ export function DiagramCanvas(props: {
   onSelect: (id: string | null) => void;
   onPresentStep?: (index: number) => void;
   onMove: (positions: Map<string, { x: number; y: number }>) => void;
+  onMoveLabel: (edgeId: string, labelT: number) => void;
   onConnectNodes: (
     source: string,
     target: string,
@@ -437,6 +447,7 @@ export function DiagramCanvas(props: {
         onSelect={props.onSelect}
         onPresentStep={props.onPresentStep ?? (() => {})}
         onMove={props.onMove}
+        onMoveLabel={props.onMoveLabel}
         onConnectNodes={props.onConnectNodes}
         onDeleteNodes={props.onDeleteNodes}
         onDeleteEdges={props.onDeleteEdges}

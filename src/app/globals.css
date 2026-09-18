@@ -698,6 +698,58 @@ button.ghost.on {
   background: #f3eee4;
 }
 
+.lane-menu-inner {
+  gap: 2px;
+}
+
+.lane-menu-row {
+  display: grid;
+  grid-template-columns: 1fr 28px;
+  gap: 2px;
+  align-items: center;
+  padding: 2px 4px 2px 6px;
+  border-radius: 10px;
+}
+
+.lane-menu-row.is-current {
+  background: #f3eee4;
+}
+
+.lane-menu-row input {
+  width: 100%;
+  min-width: 0;
+  border: 0;
+  background: transparent;
+  border-radius: 8px;
+  padding: 8px 6px;
+  font: inherit;
+  font-size: 13px;
+  color: inherit;
+}
+
+.lane-menu-row input:focus {
+  outline: none;
+  background: #ffffff;
+}
+
+.popup-menu-inner .lane-menu-delete {
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  justify-content: center;
+  color: var(--muted);
+}
+
+.popup-menu-inner .lane-menu-delete:hover {
+  color: #8a3d16;
+  background: #f6e8df;
+}
+
+.popup-menu-inner .lane-menu-create {
+  color: var(--teal);
+  font-weight: 600;
+}
+
 .menu-select {
   width: 100%;
 }
@@ -947,10 +999,39 @@ button.ghost.on {
   color: var(--muted);
 }
 
+.field-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.field-head span {
+  margin: 0;
+}
+
+.field-add {
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border: 0;
+  border-radius: 999px;
+  background: var(--teal-soft);
+  color: var(--teal);
+  cursor: pointer;
+}
+
+.field-add:hover {
+  background: #d7ebe4;
+}
+
 .field input,
 .field textarea,
 .field select,
-.edge-row input {
+.edge-row input,
+.lane-row input {
   width: 100%;
   border: 1px solid var(--line);
   background: var(--card);
@@ -969,6 +1050,12 @@ button.solid.wide {
   width: 100%;
   justify-content: center;
   margin: 8px 0 4px;
+}
+
+button.ghost.wide {
+  width: 100%;
+  justify-content: center;
+  margin: 0 0 12px;
 }
 
 button.ghost.danger {
@@ -993,6 +1080,13 @@ button.ghost.danger {
 .edge-row {
   display: grid;
   grid-template-columns: 1fr 88px 32px;
+  gap: 6px;
+  align-items: center;
+}
+
+.lane-row {
+  display: grid;
+  grid-template-columns: 1fr 32px;
   gap: 6px;
   align-items: center;
 }
@@ -1057,7 +1151,8 @@ button.ghost.danger {
 }
 
 .inspector .field input,
-.inspector .edge-row input {
+.inspector .edge-row input,
+.inspector .lane-row input {
   border: 1px solid var(--line);
   border-radius: 999px;
   background: #ffffff;
@@ -1081,7 +1176,8 @@ button.ghost.danger {
 
 .inspector .field input:focus,
 .inspector .field textarea:focus,
-.inspector .edge-row input:focus {
+.inspector .edge-row input:focus,
+.inspector .lane-row input:focus {
   outline: none;
   box-shadow: var(--btn-shadow);
 }
@@ -1137,15 +1233,39 @@ button.ghost.danger {
 }
 .react-flow__edge-textbg { fill: var(--paper); }
 .react-flow__edge-text { fill: var(--muted); font-size: 11px; }
+.react-flow__edgelabel-renderer {
+  z-index: 25;
+  pointer-events: none;
+}
 .routed-edge-label {
   position: absolute;
-  pointer-events: none;
-  padding: 2px 7px;
+  pointer-events: all;
+  padding: 3px 8px;
   font-size: 11px;
   line-height: 1.2;
+  min-height: 18px;
   color: var(--muted);
   background: #f4efe6;
   border-radius: 4px;
+  cursor: grab;
+  user-select: none;
+  touch-action: none;
+  white-space: nowrap;
+  z-index: 1;
+}
+.routed-edge-label:hover {
+  color: var(--ink);
+  box-shadow: 0 0 0 1px rgba(15, 110, 92, 0.28);
+}
+.routed-edge-label.is-dragging {
+  cursor: grabbing;
+  z-index: 8;
+  box-shadow: 0 0 0 1px rgba(15, 110, 92, 0.45);
+}
+.routed-edge-label.is-locked {
+  pointer-events: none;
+  cursor: default;
+  box-shadow: none;
 }
 
 .diagram-node {

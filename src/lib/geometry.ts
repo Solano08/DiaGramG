@@ -154,6 +154,68 @@ function pathLength(points: Pt[]) {
   return length;
 }
 
+export function clampLabelT(value: number) {
+  if (!Number.isFinite(value)) return 0.5;
+  return Math.min(0.96, Math.max(0.04, value));
+}
+
+export function pointAlongPath(points: Pt[], t: number): Pt {
+  const pts = uniquePoints(points);
+  if (!pts.length) return { x: 0, y: 0 };
+  if (pts.length === 1) return pts[0];
+  const total = pathLength(pts);
+  if (total <= 0) return pts[0];
+  const target = Math.min(1, Math.max(0, t)) * total;
+  let acc = 0;
+  for (let i = 1; i < pts.length; i += 1) {
+    const a = pts[i - 1];
+    const b = pts[i];
+    const len = Math.abs(b.x - a.x) + Math.abs(b.y - a.y);
+    if (acc + len >= target || i === pts.length - 1) {
+      const u = len <= 0 ? 0 : Math.min(1, Math.max(0, (target - acc) / len));
+      return { x: a.x + (b.x - a.x) * u, y: a.y + (b.y - a.y) * u };
+    }
+    acc += len;
+  }
+  return pts[pts.length - 1];
+}
+
+export function closestTOnPath(points: Pt[], p: Pt): number {
+  const pts = uniquePoints(points);
+  if (pts.length < 2) return 0.5;
+  const total = pathLength(pts);
+  if (total <= 0) return 0.5;
+  let bestDist = Number.POSITIVE_INFINITY;
+  let bestAlong = 0;
+  let along = 0;
+  for (let i = 1; i < pts.length; i += 1) {
+    const a = pts[i - 1];
+    const b = pts[i];
+    const dx = b.x - a.x;
+    const dy = b.y - a.y;
+    const len = Math.abs(dx) + Math.abs(dy);
+    const len2 = dx * dx + dy * dy;
+    const u =
+      len2 > 0
+        ? Math.min(1, Math.max(0, ((p.x - a.x) * dx + (p.y - a.y) * dy) / len2))
+        : 0;
+    const qx = a.x + dx * u;
+    const qy = a.y + dy * u;
+    const dist = (p.x - qx) * (p.x - qx) + (p.y - qy) * (p.y - qy);
+    if (dist < bestDist) {
+      bestDist = dist;
+      bestAlong = along + u * len;
+    }
+    along += len;
+  }
+  return Math.min(1, Math.max(0, bestAlong / total));
+}
+
+export function edgeLabelPoint(path: { points: Pt[]; mid: Pt }, labelT?: number): Pt {
+  if (labelT == null || !Number.isFinite(labelT)) return path.mid;
+  return pointAlongPath(path.points, labelT);
+}
+
 function polylineHits(points: Pt[], boxes: Rect[]) {
   let hits = 0;
   for (let i = 1; i < points.length; i += 1) {

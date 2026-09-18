@@ -110,6 +110,7 @@ export function toFlow(diagram: Diagram, laid?: LaidOut) {
       data: {
         fromSide: edge.fromSide,
         toSide: edge.toSide,
+        labelT: edge.labelT,
       },
       label: edge.label,
       labelShowBg: true,

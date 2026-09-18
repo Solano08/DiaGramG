@@ -215,27 +215,58 @@ function boundsOf(boxes: Box[], groups: GroupBox[]): LaidOut {
 
 function wrapGroups(diagram: Diagram, boxes: Box[]): GroupBox[] {
   const byId = new Map(diagram.nodes.map((node) => [node.id, node]));
-  return diagram.groups.flatMap((group) => {
+  const placed: GroupBox[] = [];
+  const empty: Diagram["groups"] = [];
+
+  for (const group of diagram.groups) {
     const kids = boxes.filter((box) => byId.get(box.id)?.groupId === group.id);
-    if (kids.length < 2 && !group.label) return [];
-    if (!kids.length) return [];
+    if (!kids.length) {
+      if (group.label) empty.push(group);
+      continue;
+    }
+    if (kids.length < 2 && !group.label) continue;
     const padX = 18;
     const padY = 36;
     const x = Math.min(...kids.map((k) => k.x)) - padX;
     const y = Math.min(...kids.map((k) => k.y)) - padY;
     const right = Math.max(...kids.map((k) => k.x + k.w)) + padX;
     const bottom = Math.max(...kids.map((k) => k.y + k.h)) + 16;
-    return [
-      {
-        id: group.id,
-        label: group.label,
-        x,
-        y,
-        w: right - x,
-        h: bottom - y,
-      },
-    ];
+    placed.push({
+      id: group.id,
+      label: group.label,
+      x,
+      y,
+      w: right - x,
+      h: bottom - y,
+    });
+  }
+
+  if (!empty.length) return placed;
+
+  const contentBottom = Math.max(
+    40,
+    ...boxes.map((box) => box.y + box.h),
+    ...placed.map((group) => group.y + group.h),
+  );
+  const laneH = 132;
+  const width = Math.max(
+    420,
+    ...placed.map((group) => group.w),
+    ...boxes.map((box) => box.w + 36),
+  );
+
+  empty.forEach((group, index) => {
+    placed.push({
+      id: group.id,
+      label: group.label,
+      x: placed[0]?.x ?? 36,
+      y: contentBottom + 28 + index * (laneH + 20),
+      w: width,
+      h: laneH,
+    });
   });
+
+  return placed;
 }
 
 function finish(diagram: Diagram, boxes: Box[]) {

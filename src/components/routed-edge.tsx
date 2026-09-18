@@ -1,14 +1,26 @@
 "use client";
 
-import { memo } from "react";
+import {
+  createContext,
+  memo,
+  useContext,
+  useEffect,
+  useRef,
+  useState,
+  type PointerEvent,
+} from "react";
 import {
   BaseEdge,
   EdgeLabelRenderer,
+  useReactFlow,
   useStore,
   type EdgeProps,
   type ReactFlowState,
 } from "@xyflow/react";
 import {
+  clampLabelT,
+  closestTOnPath,
+  edgeLabelPoint,
   orthogonalPath,
   routeEdgeSet,
   sideFromHandle,
@@ -22,7 +34,13 @@ import {
 type RouteData = {
   fromSide?: Side;
   toSide?: Side;
+  labelT?: number;
 };
+
+export const EdgeLabelEditContext = createContext<{
+  editable?: boolean;
+  onLabelT?: (edgeId: string, labelT: number) => void;
+}>({});
 
 let cacheKey = "";
 let cache = new Map<string, RoutedPath>();
@@ -137,9 +155,94 @@ function RoutedEdgeInner({
   markerEnd,
   label,
   labelStyle,
+  data,
 }: EdgeProps) {
   const routed = useStore((state) => selectRoutes(state).get(id), samePath);
+  const { screenToFlowPosition } = useReactFlow();
+  const { editable = false, onLabelT } = useContext(EdgeLabelEditContext);
+  const routeData = (data ?? {}) as RouteData;
+  const [draftT, setDraftT] = useState<number | null>(null);
+  const [dragging, setDragging] = useState(false);
+  const draggingRef = useRef(false);
+  const movedRef = useRef(false);
+  const offsetRef = useRef(0);
+  const startTRef = useRef(0);
+  const draftRef = useRef<number | null>(null);
+
+  useEffect(() => {
+    if (!draggingRef.current) {
+      draftRef.current = null;
+      setDraftT(null);
+    }
+  }, [routeData.labelT]);
+
   if (!routed) return null;
+
+  const labelT = draftT ?? routeData.labelT;
+  const pos = edgeLabelPoint(routed, labelT);
+
+  const tFromPointer = (event: PointerEvent<HTMLDivElement>) => {
+    const cursor = screenToFlowPosition({ x: event.clientX, y: event.clientY });
+    return clampLabelT(closestTOnPath(routed.points, cursor) + offsetRef.current);
+  };
+
+  const onPointerDown = (event: PointerEvent<HTMLDivElement>) => {
+    if (!editable || !onLabelT) return;
+    event.preventDefault();
+    event.stopPropagation();
+    event.nativeEvent.stopImmediatePropagation();
+    const cursor = screenToFlowPosition({ x: event.clientX, y: event.clientY });
+    const cursorT = closestTOnPath(routed.points, cursor);
+    const currentT =
+      draftT ??
+      (typeof routeData.labelT === "number"
+        ? routeData.labelT
+        : closestTOnPath(routed.points, routed.mid));
+    offsetRef.current = currentT - cursorT;
+    startTRef.current = currentT;
+    draggingRef.current = true;
+    movedRef.current = false;
+    draftRef.current = currentT;
+    setDragging(true);
+    setDraftT(currentT);
+    try {
+      event.currentTarget.setPointerCapture(event.pointerId);
+    } catch {
+      /* pointer capture is optional; dragging still works via element events */
+    }
+  };
+
+  const onPointerMove = (event: PointerEvent<HTMLDivElement>) => {
+    if (!draggingRef.current) return;
+    event.preventDefault();
+    const next = tFromPointer(event);
+    if (Math.abs(next - startTRef.current) > 0.002) movedRef.current = true;
+    draftRef.current = next;
+    setDraftT(next);
+  };
+
+  const onPointerUp = (event: PointerEvent<HTMLDivElement>) => {
+    if (!draggingRef.current) return;
+    draggingRef.current = false;
+    setDragging(false);
+    if (event.currentTarget.hasPointerCapture?.(event.pointerId)) {
+      try {
+        event.currentTarget.releasePointerCapture(event.pointerId);
+      } catch {
+        /* ignore */
+      }
+    }
+    const next = tFromPointer(event);
+    const changed = Math.abs(next - startTRef.current) > 0.002;
+    if (changed || movedRef.current) {
+      draftRef.current = next;
+      setDraftT(next);
+      onLabelT?.(id, Math.round(next * 1000) / 1000);
+    } else {
+      draftRef.current = null;
+      setDraftT(null);
+    }
+  };
 
   return (
     <>
@@ -147,11 +250,20 @@ function RoutedEdgeInner({
       {label ? (
         <EdgeLabelRenderer>
           <div
-            className="routed-edge-label nodrag nopan"
+            className={`routed-edge-label nodrag nopan${dragging ? " is-dragging" : ""}${editable ? "" : " is-locked"}`}
+            role={editable ? "button" : undefined}
+            aria-label={editable ? `Mover etiqueta ${label}` : undefined}
             style={{
-              transform: `translate(-50%, -50%) translate(${routed.mid.x}px, ${routed.mid.y}px)`,
+              transform: `translate(-50%, -50%) translate(${pos.x}px, ${pos.y}px)`,
+              pointerEvents: editable ? "all" : "none",
               ...labelStyle,
             }}
+            title={editable ? "Arrastra para mover la etiqueta" : undefined}
+            onPointerDown={onPointerDown}
+            onPointerMove={onPointerMove}
+            onPointerUp={onPointerUp}
+            onPointerCancel={onPointerUp}
+            onClick={(event) => event.stopPropagation()}
           >
             {label}
           </div>

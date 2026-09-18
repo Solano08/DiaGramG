@@ -133,6 +133,15 @@ export const diagramEdgeSchema = z.object({
         ? (raw.trim().toLowerCase() as (typeof SIDES)[number])
         : undefined;
     }),
+  labelT: z
+    .union([z.number(), z.string(), z.null()])
+    .optional()
+    .transform((value) => {
+      if (value == null || value === "") return undefined;
+      const n = typeof value === "number" ? value : Number(value);
+      if (!Number.isFinite(n)) return undefined;
+      return Math.min(1, Math.max(0, n));
+    }),
 });
 
 export const diagramSchema = z.object({
@@ -205,6 +214,7 @@ export type DiagramEdge = {
   kind?: (typeof EDGE_KINDS)[number];
   fromSide?: Side;
   toSide?: Side;
+  labelT?: number;
 };
 export type Diagram = {
   title: string;

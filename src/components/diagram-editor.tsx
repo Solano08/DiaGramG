@@ -5,14 +5,18 @@ import { Copy, Plus, Redo2, Trash2, Undo2 } from "lucide-react";
 import type { Diagram, NodeKind } from "@/lib/schema";
 import { KIND_LABELS, NODE_KINDS } from "@/lib/schema";
 import { cn } from "@/lib/cn";
+import { LaneMenu } from "./lane-menu";
 import { MenuSelect } from "./menu-select";
 import {
+  addGroup,
   addNode,
   connectNodes,
   deleteEdges,
+  deleteGroup,
   deleteNodes,
   duplicateNode,
   patchEdge,
+  patchGroup,
   patchNode,
 } from "@/lib/edit-diagram";
 
@@ -140,26 +144,29 @@ export function DiagramEditor({
                   placeholder="Sí, No, opcional…"
                 />
               </label>
-              {diagram.groups.length ? (
-                <label className="field">
-                  <span>Carril</span>
-                  <MenuSelect
-                    value={editing.groupId ?? ""}
-                    placeholder="Sin carril"
-                    options={[
-                      { value: "", label: "Sin carril" },
-                      ...diagram.groups.map((group) => ({ value: group.id, label: group.label })),
-                    ]}
-                    onChange={(next) =>
-                      onChange(
-                        patchNode(diagram, editing.id, {
-                          groupId: next || undefined,
-                        }),
-                      )
-                    }
-                  />
-                </label>
-              ) : null}
+              <LaneMenu
+                label="Carril"
+                groups={diagram.groups}
+                value={editing.groupId ?? ""}
+                noneLabel="Sin carril"
+                onSelect={(groupId) =>
+                  onChange(
+                    patchNode(diagram, editing.id, {
+                      groupId: groupId || undefined,
+                    }),
+                  )
+                }
+                onCreate={() => {
+                  const result = addGroup(diagram, { nodeId: editing.id });
+                  onChange(result.diagram);
+                  return result.id;
+                }}
+                onRename={(groupId, name, draft) =>
+                  onChange(patchGroup(diagram, groupId, { label: name }), draft ? { history: false } : undefined)
+                }
+                onRenameEnd={() => onChange(diagram)}
+                onDelete={(groupId) => onChange(deleteGroup(diagram, groupId))}
+              />
 
               <div className="editor-actions">
                 <button
@@ -294,6 +301,20 @@ export function DiagramEditor({
               >
                 <Plus size={15} /> Añadir recuadro
               </button>
+              <LaneMenu
+                label="Carriles"
+                groups={diagram.groups}
+                onCreate={() => {
+                  const result = addGroup(diagram);
+                  onChange(result.diagram);
+                  return result.id;
+                }}
+                onRename={(groupId, name, draft) =>
+                  onChange(patchGroup(diagram, groupId, { label: name }), draft ? { history: false } : undefined)
+                }
+                onRenameEnd={() => onChange(diagram)}
+                onDelete={(groupId) => onChange(deleteGroup(diagram, groupId))}
+              />
               <ul className="stats">
                 <li>
                   <b>{diagram.nodes.length}</b> nodos

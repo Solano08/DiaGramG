@@ -1,4 +1,4 @@
-import { routeEdgeSet, staggerT, type Side } from "./geometry";
+import { edgeLabelPoint, routeEdgeSet, staggerT, type Side } from "./geometry";
 import { absNodeBoxes, layoutDiagram } from "./layout";
 import type { Diagram, NodeKind } from "./schema";
 
@@ -103,9 +103,11 @@ export function sceneFromDiagram(diagram: Diagram): DiagramScene {
   const edges: SceneEdge[] = usable.flatMap((edge) => {
     const routed = routedMap.get(edge.id);
     if (!routed) return [];
-    const mid = { ...routed.mid };
-    for (const other of placedLabels) {
-      if (Math.hypot(other.x - mid.x, other.y - mid.y) < 24) mid.y += 18;
+    const mid = { ...edgeLabelPoint(routed, edge.labelT) };
+    if (edge.labelT == null) {
+      for (const other of placedLabels) {
+        if (Math.hypot(other.x - mid.x, other.y - mid.y) < 24) mid.y += 18;
+      }
     }
     placedLabels.push(mid);
     return [

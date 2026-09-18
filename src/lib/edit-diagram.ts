@@ -1,4 +1,4 @@
-import type { Diagram, DiagramEdge, DiagramNode, NodeKind, Side } from "./schema";
+import type { Diagram, DiagramEdge, DiagramGroup, DiagramNode, NodeKind, Side } from "./schema";
 import { applyNodePositions, freezeLayout, NODE_SIZE } from "./layout";
 
 export { applyNodePositions, freezeLayout };
@@ -15,6 +15,18 @@ export function nextNodeId(diagram: Diagram) {
 
 export function nextEdgeId(diagram: Diagram) {
   return nextPrefixedId("e", diagram.edges.map((edge) => edge.id));
+}
+
+export function nextGroupId(diagram: Diagram) {
+  return nextPrefixedId("g", diagram.groups.map((group) => group.id));
+}
+
+function nextGroupLabel(diagram: Diagram) {
+  const used = new Set(diagram.groups.map((group) => group.label.trim().toLowerCase()));
+  if (!used.has("nuevo carril")) return "Nuevo carril";
+  let i = 2;
+  while (used.has(`nuevo carril ${i}`)) i += 1;
+  return `Nuevo carril ${i}`;
 }
 
 export function patchNode(
@@ -135,4 +147,51 @@ export function connectNodes(
     toSide: sideFromHandle(options?.targetHandle),
   };
   return { ...frozen, edges: [...frozen.edges, edge] };
+}
+
+export function addGroup(
+  diagram: Diagram,
+  options?: { label?: string; nodeId?: string },
+): { diagram: Diagram; id: string } {
+  const frozen = freezeLayout(diagram);
+  const id = nextGroupId(frozen);
+  const group: DiagramGroup = {
+    id,
+    label: options?.label?.trim() || nextGroupLabel(frozen),
+  };
+  return {
+    diagram: {
+      ...frozen,
+      groups: [...frozen.groups, group],
+      nodes: options?.nodeId
+        ? frozen.nodes.map((node) =>
+            node.id === options.nodeId ? { ...node, groupId: id } : node,
+          )
+        : frozen.nodes,
+    },
+    id,
+  };
+}
+
+export function patchGroup(
+  diagram: Diagram,
+  groupId: string,
+  patch: Partial<DiagramGroup>,
+): Diagram {
+  return {
+    ...diagram,
+    groups: diagram.groups.map((group) =>
+      group.id === groupId ? { ...group, ...patch, id: group.id } : group,
+    ),
+  };
+}
+
+export function deleteGroup(diagram: Diagram, groupId: string): Diagram {
+  return {
+    ...diagram,
+    groups: diagram.groups.filter((group) => group.id !== groupId),
+    nodes: diagram.nodes.map((node) =>
+      node.groupId === groupId ? { ...node, groupId: undefined } : node,
+    ),
+  };
 }

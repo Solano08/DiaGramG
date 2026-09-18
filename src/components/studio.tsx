@@ -21,9 +21,10 @@ import {
   connectNodes,
   deleteEdges,
   deleteNodes,
+  patchEdge,
 } from "@/lib/edit-diagram";
 import { presentationSteps } from "@/lib/graph-flow";
-import { isSupportedFile } from "@/lib/files";
+import { CONVERT_UPLOAD_LIMIT, isSupportedFile, toJpegFile } from "@/lib/files";
 import type { Diagram } from "@/lib/schema";
 import { cn } from "@/lib/cn";
 import { DiagramEditor } from "./diagram-editor";
@@ -199,7 +200,7 @@ export function Studio() {
     setModelNote(null);
     try {
       const form = new FormData();
-      form.append("file", file);
+      form.append("sourceName", file.name);
       if (file.type === "application/pdf" || file.name.toLowerCase().endsWith(".pdf")) {
         const { renderPdfPages } = await import("@/lib/pdf");
         const preview = await renderPdfPages(file, {
@@ -211,11 +212,20 @@ export function Studio() {
         setPages(preview);
         for (const [index, dataUrl] of preview.slice(0, 2).entries()) {
           const blob = await (await fetch(dataUrl)).blob();
-          form.append("page", blob, `page-${index + 1}.png`);
+          form.append("page", await toJpegFile(blob, `page-${index + 1}.jpg`));
         }
       } else {
         setPages([URL.createObjectURL(file)]);
-        form.append("page", file, file.name);
+        form.append("page", await toJpegFile(file, file.name));
+      }
+      const uploadBytes = [...form.values()].reduce(
+        (total, value) => total + (value instanceof Blob ? value.size : 0),
+        0,
+      );
+      if (uploadBytes > CONVERT_UPLOAD_LIMIT) {
+        throw new Error(
+          "Las capturas superan 4.5 MB (límite de Vercel). Usa una sola página o un PDF más liviano.",
+        );
       }
       const res = await fetch("/api/convert", { method: "POST", body: form });
       const data = (await res.json()) as {
@@ -642,11 +652,6 @@ export function Studio() {
                 {usedModel ? (
                   <p className="model-used">Modelo: {modelLabel(usedModel)}</p>
                 ) : null}
-                {presenting ? null : (
-                  <p className="model-used">
-                    Pasa el cursor sobre un recuadro para iluminar su ruta de flujo.
-                  </p>
-                )}
               </div>
               {diagrams.length > 1 ? (
                 <div className="tabs">
@@ -684,6 +689,9 @@ export function Studio() {
                   setPresentStep(index);
                 }}
                 onMove={(positions) => mutateActive((current) => applyNodePositions(current, positions))}
+                onMoveLabel={(edgeId, labelT) =>
+                  mutateActive((current) => patchEdge(current, edgeId, { labelT }))
+                }
                 onConnectNodes={(source, target, sourceHandle, targetHandle) =>
                   mutateActive((current) =>
                     connectNodes(current, source, target, { sourceHandle, targetHandle }),
