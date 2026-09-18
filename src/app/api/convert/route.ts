@@ -83,7 +83,7 @@ export async function POST(request: Request) {
     {
       error:
         failures.find((item) => !/did not match schema|No object generated/i.test(item)) ??
-        "Gemini no pudo reconstruir el diagrama. Vuelve a intentar; si persiste, usa una captura más nítida o una sola página.",
+        "No se pudo reconstruir el diagrama. Vuelve a intentar; si persiste, usa una captura más nítida o una sola página.",
       detail: failures,
     },
     { status: 422 },

@@ -35,6 +35,7 @@ function Card({
         "diagram-node",
         `kind-${kind}`,
         selected && "is-selected",
+        data.emphasis && data.emphasis !== "idle" && `is-${data.emphasis}`,
       )}
     >
       <Handles />

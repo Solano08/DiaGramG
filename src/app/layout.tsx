@@ -1,6 +1,5 @@
 import type { Metadata } from "next";
 import { Geist, Geist_Mono, Instrument_Serif } from "next/font/google";
-import { SplashScreen } from "@/components/splash-screen";
 import "./globals.css";
 
 const geistSans = Geist({
@@ -21,7 +20,7 @@ const instrument = Instrument_Serif({
 });
 
 export const metadata: Metadata = {
-  title: "DiaGramG — PDF a diagrama HTML",
+  title: "DiagramG — PDF a diagrama HTML",
   description:
     "Sube el PDF de un diagrama y reconstruye una versión moderna, interactiva y presentable en HTML.",
 };
@@ -33,7 +32,6 @@ export default function RootLayout({ children }: LayoutProps<"/">) {
       className={`${geistSans.variable} ${geistMono.variable} ${instrument.variable} h-full antialiased`}
     >
       <body className="min-h-full">
-        <SplashScreen />
         {children}
       </body>
     </html>

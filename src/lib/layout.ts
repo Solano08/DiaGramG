@@ -519,7 +519,63 @@ function layoutSwimlanes(diagram: Diagram): LaidOut {
   return finish(diagram, boxes);
 }
 
+export function hasManualLayout(diagram: Diagram) {
+  return (
+    diagram.nodes.length > 0 &&
+    diagram.nodes.every((node) => node.px != null && node.py != null)
+  );
+}
+
+function layoutFromManual(diagram: Diagram): LaidOut {
+  const boxes: Box[] = diagram.nodes.map((node) => {
+    const { w, h } = sizeOf(node);
+    return {
+      id: node.id,
+      x: node.px ?? 48,
+      y: node.py ?? 48,
+      w,
+      h,
+    };
+  });
+  return boundsOf(boxes, wrapGroups(diagram, boxes));
+}
+
+export function freezeLayout(diagram: Diagram): Diagram {
+  if (hasManualLayout(diagram)) return diagram;
+  const laid = layoutDiagram(diagram);
+  const abs = new Map(absNodeBoxes(laid).map((box) => [box.id, box]));
+  return {
+    ...diagram,
+    nodes: diagram.nodes.map((node) => {
+      const box = abs.get(node.id);
+      if (!box) return node;
+      return {
+        ...node,
+        px: box.x,
+        py: box.y,
+        col: undefined,
+        row: undefined,
+      };
+    }),
+  };
+}
+
+export function applyNodePositions(
+  diagram: Diagram,
+  positions: Map<string, { x: number; y: number }>,
+): Diagram {
+  const frozen = freezeLayout(diagram);
+  return {
+    ...frozen,
+    nodes: frozen.nodes.map((node) => {
+      const pos = positions.get(node.id);
+      return pos ? { ...node, px: pos.x, py: pos.y } : node;
+    }),
+  };
+}
+
 export function layoutDiagram(diagram: Diagram): LaidOut {
+  if (hasManualLayout(diagram)) return layoutFromManual(diagram);
   if (canUseGrid(diagram)) return layoutFromGrid(diagram);
   if (canUseSpatial(diagram)) return layoutFromPositions(diagram);
   if (isSwimlane(diagram)) return layoutSwimlanes(diagram);

@@ -7,10 +7,10 @@ import {
 } from "./parse-diagram";
 import { conversionModelSchema, type ConversionResult } from "./schema";
 
-export const PREFERRED_MODEL = "google/gemini-2.5-flash";
+export const PREFERRED_MODEL = "google/gemini-3.1-pro-preview";
 export const MODELS = [
-  "google/gemini-2.5-flash",
-  "google/gemini-2.5-flash-lite",
+  "google/gemini-3.1-pro-preview",
+  "google/gemini-3.8-flash",
 ] as const;
 
 export type ContentPart =
@@ -128,7 +128,7 @@ async function extractWithModel(model: string, content: ContentPart[]) {
     if (isRestricted(error)) throw error;
     if (isSchemaMismatch(error)) {
       throw new Error(
-        "Gemini no devolvió un diagrama válido. Vuelve a intentar con el mismo PDF.",
+        "El modelo no devolvió un diagrama válido. Vuelve a intentar con el mismo PDF.",
       );
     }
     throw error;

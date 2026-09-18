@@ -1,6 +1,6 @@
 import { z } from "zod";
 
-const NODE_KINDS = [
+export const NODE_KINDS = [
   "start",
   "end",
   "process",
@@ -96,6 +96,8 @@ export const diagramNodeSchema = z.object({
   h: percent,
   col: gridIndex,
   row: gridIndex,
+  px: z.number().optional(),
+  py: z.number().optional(),
 });
 
 export const diagramEdgeSchema = z.object({
@@ -151,6 +153,19 @@ export const conversionSchema = z.object({
   diagrams: z.array(diagramSchema).min(1),
 });
 
+export const KIND_LABELS: Record<(typeof NODE_KINDS)[number], string> = {
+  start: "Inicio",
+  end: "Cierre",
+  process: "Proceso",
+  decision: "Decisión",
+  data: "Datos",
+  actor: "Actor",
+  system: "Sistema",
+  io: "Entrada / salida",
+  note: "Nota",
+  document: "Documento",
+};
+
 export type NodeKind = (typeof NODE_KINDS)[number];
 export type DiagramType = (typeof DIAGRAM_TYPES)[number];
 export type Direction = (typeof DIRECTIONS)[number];
@@ -179,6 +194,8 @@ export type DiagramNode = {
   h?: number;
   col?: number;
   row?: number;
+  px?: number;
+  py?: number;
 };
 export type DiagramEdge = {
   id: string;

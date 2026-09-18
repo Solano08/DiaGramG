@@ -4,21 +4,33 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import dynamic from "next/dynamic";
 import {
   ArrowLeft,
-  Download,
   Eye,
   FileJson,
   Image as ImageIcon,
   LoaderCircle,
-  Maximize2,
+  Presentation,
   Sparkles,
   Upload,
 } from "lucide-react";
 import { SAMPLE_DIAGRAM } from "@/lib/sample";
 import { diagramToHtml, downloadTextFile } from "@/lib/export-html";
+import { diagramToSvg, downloadPngFile, downloadSvgFile } from "@/lib/export-image";
+import {
+  addNode,
+  applyNodePositions,
+  connectNodes,
+  deleteEdges,
+  deleteNodes,
+} from "@/lib/edit-diagram";
+import { presentationSteps } from "@/lib/graph-flow";
 import { isSupportedFile } from "@/lib/files";
-import type { Diagram, NodeKind } from "@/lib/schema";
+import type { Diagram } from "@/lib/schema";
 import { cn } from "@/lib/cn";
+import { DiagramEditor } from "./diagram-editor";
+import { ExportSplit } from "./export-split";
 import { HeroWaves } from "./hero-waves";
+import { PresentationBar } from "./presentation-bar";
+import { SplashScreen, type SplashMode } from "./splash-screen";
 
 const DiagramCanvas = dynamic(
   () => import("./diagram-canvas").then((mod) => mod.DiagramCanvas),
@@ -26,28 +38,42 @@ const DiagramCanvas = dynamic(
 );
 
 type Status = "idle" | "converting" | "ready" | "error";
+type PresentPhase =
+  | "off"
+  | "enter-cover"
+  | "enter-hold"
+  | "enter-reveal"
+  | "enter-overview"
+  | "enter-zoom"
+  | "live"
+  | "leave-cover"
+  | "leave-hold"
+  | "leave-reveal";
 
-const KIND_LABEL: Record<NodeKind, string> = {
-  start: "Inicio",
-  end: "Cierre",
-  process: "Proceso",
-  decision: "Decisión",
-  data: "Datos",
-  actor: "Actor",
-  system: "Sistema",
-  io: "Entrada / salida",
-  note: "Nota",
-  document: "Documento",
-};
+type PresentCamera = "overview" | "zoom" | "follow";
 
 const STEPS = [
   "Leyendo el PDF a alta resolución…",
-  "Gemini recorre cajas, columnas, filas y flechas…",
+  "Gemini 3.1 Pro recorre cajas, columnas, filas y flechas…",
   "Componiendo un diagrama legible…",
 ];
 
+const PRESENT_MS = {
+  cover: 520,
+  hold: 420,
+  reveal: 560,
+  overview: 580,
+  zoom: 980,
+} as const;
+
+function prefersReducedMotion() {
+  return window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+}
+
 export function Studio() {
   const inputRef = useRef<HTMLInputElement>(null);
+  const [splashKey, setSplashKey] = useState(0);
+  const [splashMode, setSplashMode] = useState<SplashMode>("enter");
   const [status, setStatus] = useState<Status>("idle");
   const [error, setError] = useState<string | null>(null);
   const [configured, setConfigured] = useState<boolean | null>(null);
@@ -61,13 +87,47 @@ export function Studio() {
   const [dragOver, setDragOver] = useState(false);
   const [usedModel, setUsedModel] = useState<string | null>(null);
   const [modelNote, setModelNote] = useState<string | null>(null);
+  const [past, setPast] = useState<Diagram[][]>([]);
+  const [future, setFuture] = useState<Diagram[][]>([]);
+  const [presentPhase, setPresentPhase] = useState<PresentPhase>("off");
+  const [presentStep, setPresentStep] = useState(0);
+  const [presentPlaying, setPresentPlaying] = useState(false);
+  const presenting =
+    presentPhase === "enter-hold" ||
+    presentPhase === "enter-reveal" ||
+    presentPhase === "enter-overview" ||
+    presentPhase === "enter-zoom" ||
+    presentPhase === "live" ||
+    presentPhase === "leave-cover";
+  const presentSession = presentPhase !== "off";
+  const presentLeaving = presentPhase.startsWith("leave");
+  const presentVeilOn =
+    presentPhase === "enter-cover" ||
+    presentPhase === "enter-hold" ||
+    presentPhase === "leave-cover" ||
+    presentPhase === "leave-hold";
+  const presentOverview =
+    presentPhase === "enter-hold" ||
+    presentPhase === "enter-reveal" ||
+    presentPhase === "enter-overview" ||
+    presentPhase === "enter-zoom";
+  const presentCamera: PresentCamera =
+    presentPhase === "enter-zoom"
+      ? "zoom"
+      : presentPhase === "live" || presentPhase === "leave-cover"
+        ? "follow"
+        : "overview";
+  const instantCamera =
+    presentPhase !== "off" && presentPhase !== "live" && presentPhase !== "enter-zoom";
+  const [fullscreen, setFullscreen] = useState(false);
+  const diagramsRef = useRef(diagrams);
+  const activeRef = useRef(active);
+  const draftStart = useRef<Diagram[] | null>(null);
+  diagramsRef.current = diagrams;
+  activeRef.current = active;
 
   const diagram = diagrams[active];
-
-  const selected = useMemo(
-    () => diagram?.nodes.find((n) => n.id === selectedId),
-    [diagram, selectedId],
-  );
+  const steps = useMemo(() => (diagram ? presentationSteps(diagram) : []), [diagram]);
 
   useEffect(() => {
     void fetch("/api/convert")
@@ -86,7 +146,12 @@ export function Studio() {
     };
   }, [status]);
 
-  const reset = useCallback(() => {
+  const replaySplash = useCallback((mode: SplashMode = "enter") => {
+    setSplashMode(mode);
+    setSplashKey((key) => key + 1);
+  }, []);
+
+  const applyReset = useCallback(() => {
     setPages((prev) => {
       for (const src of prev) {
         if (src.startsWith("blob:")) URL.revokeObjectURL(src);
@@ -102,7 +167,21 @@ export function Studio() {
     setCompare(false);
     setUsedModel(null);
     setModelNote(null);
+    setPast([]);
+    setFuture([]);
+    setPresentPhase("off");
+    setPresentStep(0);
+    setPresentPlaying(false);
+    draftStart.current = null;
   }, []);
+
+  const reset = useCallback(() => {
+    if (status === "ready" || status === "converting") {
+      replaySplash("leave");
+      return;
+    }
+    applyReset();
+  }, [applyReset, replaySplash, status]);
 
   const convertFile = useCallback(async (file: File) => {
     if (!isSupportedFile(file)) {
@@ -110,6 +189,7 @@ export function Studio() {
       setStatus("error");
       return;
     }
+    replaySplash();
     setError(null);
     setFileName(file.name);
     setStep(0);
@@ -146,15 +226,21 @@ export function Studio() {
       if (!res.ok) throw new Error(data.error || "No se pudo convertir el archivo.");
       if (!data.diagrams?.length) throw new Error("No se encontró un diagrama en el archivo.");
       setDiagrams(data.diagrams);
-      setUsedModel(data.model ?? "google/gemini-2.5-flash");
+      setUsedModel(data.model ?? "google/gemini-3.1-pro-preview");
       setModelNote(null);
       setActive(0);
+      setPast([]);
+      setFuture([]);
+      setPresentPhase("off");
+      setPresentStep(0);
+      setPresentPlaying(false);
+      draftStart.current = null;
       setStatus("ready");
     } catch (err) {
       setStatus("error");
       setError(err instanceof Error ? err.message : "Error al convertir.");
     }
-  }, []);
+  }, [replaySplash]);
 
   const onFiles = useCallback(
     (list: FileList | null) => {
@@ -165,6 +251,7 @@ export function Studio() {
   );
 
   const loadSample = useCallback(() => {
+    replaySplash();
     setFileName("ejemplo-proceso.pdf");
     setPages([]);
     setDiagrams([SAMPLE_DIAGRAM]);
@@ -175,7 +262,157 @@ export function Studio() {
     setCompare(false);
     setUsedModel("ejemplo local");
     setModelNote(null);
+    setPast([]);
+    setFuture([]);
+    setPresentPhase("off");
+    setPresentStep(0);
+    setPresentPlaying(false);
+    draftStart.current = null;
+  }, [replaySplash]);
+
+  const applyDiagrams = useCallback((next: Diagram[]) => {
+    diagramsRef.current = next;
+    setDiagrams(next);
   }, []);
+
+  const changeActive = useCallback(
+    (next: Diagram, options?: { history?: boolean }) => {
+      const index = activeRef.current;
+      const current = diagramsRef.current;
+      const same = current[index] === next;
+      if (options?.history === false) {
+        if (!draftStart.current) draftStart.current = current;
+        applyDiagrams(current.map((item, i) => (i === index ? next : item)));
+        return;
+      }
+      if (draftStart.current) {
+        setPast((value) => [...value.slice(-40), draftStart.current as Diagram[]]);
+        draftStart.current = null;
+        setFuture([]);
+        if (!same) applyDiagrams(current.map((item, i) => (i === index ? next : item)));
+        return;
+      }
+      if (same) return;
+      setPast((value) => [...value.slice(-40), current]);
+      setFuture([]);
+      applyDiagrams(current.map((item, i) => (i === index ? next : item)));
+    },
+    [applyDiagrams],
+  );
+
+  const mutateActive = useCallback(
+    (updater: (current: Diagram) => Diagram, options?: { history?: boolean }) => {
+      const current = diagramsRef.current[activeRef.current];
+      if (!current) return;
+      changeActive(updater(current), options);
+    },
+    [changeActive],
+  );
+
+  const undo = useCallback(() => {
+    setPast((value) => {
+      if (!value.length) return value;
+      const prev = value[value.length - 1];
+      setFuture((next) => [diagramsRef.current, ...next].slice(0, 40));
+      draftStart.current = null;
+      applyDiagrams(prev);
+      return value.slice(0, -1);
+    });
+  }, [applyDiagrams]);
+
+  const redo = useCallback(() => {
+    setFuture((value) => {
+      if (!value.length) return value;
+      const [next, ...rest] = value;
+      setPast((prev) => [...prev.slice(-40), diagramsRef.current]);
+      draftStart.current = null;
+      applyDiagrams(next);
+      return rest;
+    });
+  }, [applyDiagrams]);
+
+  const exitPresentation = useCallback(() => {
+    setPresentPlaying(false);
+    if (document.fullscreenElement) void document.exitFullscreen();
+    setPresentPhase((current) => {
+      if (current === "off" || current.startsWith("leave")) return current;
+      if (prefersReducedMotion() || current === "enter-cover") return "leave-reveal";
+      return "leave-cover";
+    });
+  }, []);
+
+  const startPresentation = useCallback(() => {
+    setSelectedId(null);
+    setPresentPlaying(true);
+    setPresentStep(0);
+    if (prefersReducedMotion()) {
+      setPresentPhase("live");
+      return;
+    }
+    setPresentPhase("enter-cover");
+  }, []);
+
+  const toggleFullscreen = useCallback(() => {
+    const node = document.querySelector(".canvas-shell");
+    if (node && !document.fullscreenElement) {
+      void (node as HTMLElement).requestFullscreen();
+    } else if (document.fullscreenElement) {
+      void document.exitFullscreen();
+    }
+  }, []);
+
+  useEffect(() => {
+    const onKey = (event: KeyboardEvent) => {
+      if ((event.target as HTMLElement | null)?.closest("input, textarea, select")) return;
+      if (event.key === "Escape" && presentSession) {
+        event.preventDefault();
+        if (!presentLeaving) exitPresentation();
+        return;
+      }
+      if (presentPhase === "live") {
+        if (event.key === "ArrowRight" || event.key === "PageDown") {
+          event.preventDefault();
+          setPresentPlaying(false);
+          setPresentStep((value) => Math.min(steps.length - 1, value + 1));
+          return;
+        }
+        if (event.key === "ArrowLeft" || event.key === "PageUp") {
+          event.preventDefault();
+          setPresentPlaying(false);
+          setPresentStep((value) => Math.max(0, value - 1));
+          return;
+        }
+        if (event.key === " " || event.key === "Spacebar") {
+          event.preventDefault();
+          setPresentPlaying((value) => !value);
+          return;
+        }
+        if (event.key === "Home") {
+          event.preventDefault();
+          setPresentPlaying(false);
+          setPresentStep(0);
+          return;
+        }
+        if (event.key === "End") {
+          event.preventDefault();
+          setPresentPlaying(false);
+          setPresentStep(Math.max(0, steps.length - 1));
+          return;
+        }
+      }
+      if (!(event.ctrlKey || event.metaKey)) return;
+      const key = event.key.toLowerCase();
+      if (key === "z" && !event.shiftKey) {
+        event.preventDefault();
+        undo();
+      } else if (key === "y" || (key === "z" && event.shiftKey)) {
+        event.preventDefault();
+        redo();
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [exitPresentation, presentLeaving, presentPhase, presentSession, redo, steps.length, undo]);
 
   const exportHtml = useCallback(() => {
     if (!diagram) return;
@@ -195,23 +432,77 @@ export function Studio() {
     );
   }, [diagram]);
 
-  const present = useCallback(() => {
-    const node = document.querySelector(".canvas-shell");
-    if (node && !document.fullscreenElement) {
-      void (node as HTMLElement).requestFullscreen();
-    } else if (document.fullscreenElement) {
-      void document.exitFullscreen();
-    }
+  const exportPng = useCallback(() => {
+    if (!diagram) return;
+    void downloadPngFile(`${slug(diagram.title)}.png`, diagramToSvg(diagram));
+  }, [diagram]);
+
+  const exportSvg = useCallback(() => {
+    if (!diagram) return;
+    downloadSvgFile(`${slug(diagram.title)}.svg`, diagramToSvg(diagram));
+  }, [diagram]);
+
+  useEffect(() => {
+    const onFull = () => setFullscreen(Boolean(document.fullscreenElement));
+    document.addEventListener("fullscreenchange", onFull);
+    return () => document.removeEventListener("fullscreenchange", onFull);
   }, []);
+
+  useEffect(() => {
+    if (presentPhase !== "live" || !presentPlaying || steps.length === 0) return;
+    const timer = window.setInterval(() => {
+      setPresentStep((value) => {
+        if (value >= steps.length - 1) {
+          setPresentPlaying(false);
+          return value;
+        }
+        return value + 1;
+      });
+    }, 2200);
+    return () => window.clearInterval(timer);
+  }, [presentPhase, presentPlaying, steps.length]);
+
+  useEffect(() => {
+    if (presentPhase === "off" || presentPhase === "live") return;
+    const reduce = prefersReducedMotion();
+    const wait = (ms: number) => (reduce ? 0 : ms);
+    let timer = 0;
+    if (presentPhase === "enter-cover") {
+      timer = window.setTimeout(() => setPresentPhase("enter-hold"), wait(PRESENT_MS.cover));
+    } else if (presentPhase === "enter-hold") {
+      timer = window.setTimeout(() => setPresentPhase("enter-reveal"), wait(PRESENT_MS.hold));
+    } else if (presentPhase === "enter-reveal") {
+      timer = window.setTimeout(() => setPresentPhase("enter-overview"), wait(PRESENT_MS.reveal));
+    } else if (presentPhase === "enter-overview") {
+      timer = window.setTimeout(() => setPresentPhase("enter-zoom"), wait(PRESENT_MS.overview));
+    } else if (presentPhase === "enter-zoom") {
+      timer = window.setTimeout(() => setPresentPhase("live"), wait(PRESENT_MS.zoom));
+    } else if (presentPhase === "leave-cover") {
+      timer = window.setTimeout(() => setPresentPhase("leave-hold"), wait(PRESENT_MS.cover));
+    } else if (presentPhase === "leave-hold") {
+      setPresentStep(0);
+      timer = window.setTimeout(() => setPresentPhase("leave-reveal"), wait(PRESENT_MS.hold));
+    } else if (presentPhase === "leave-reveal") {
+      timer = window.setTimeout(() => setPresentPhase("off"), wait(PRESENT_MS.reveal));
+    }
+    return () => window.clearTimeout(timer);
+  }, [presentPhase]);
+
+  const safePresentStep = steps.length ? Math.min(presentStep, steps.length - 1) : 0;
 
   return (
     <div className="studio">
+      <SplashScreen
+        key={splashKey}
+        mode={splashMode}
+        onCovered={splashMode === "leave" ? applyReset : undefined}
+      />
       <header className="topbar">
         <button type="button" className="brand" onClick={reset}>
           {/* Logo local en /public/logo.png */}
           {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img src="/logo.png?v=2" alt="DiaGramG" className="brand-logo" />
-          <strong>DiaGramG</strong>
+          <img src="/Logo.jpeg?v=2" alt="DiagramG" className="brand-logo" />
+          <strong>DiagramG</strong>
         </button>
         <div className="top-actions">
           {configured === false ? (
@@ -225,15 +516,23 @@ export function Studio() {
               <button type="button" className="ghost" onClick={() => setCompare((v) => !v)}>
                 <Eye size={16} /> {compare ? "Ocultar original" : "Comparar original"}
               </button>
-              <button type="button" className="ghost" onClick={present}>
-                <Maximize2 size={16} /> Presentar
+              <button
+                type="button"
+                className={cn("ghost", presentSession && "on")}
+                onClick={() => {
+                  if (presentSession) {
+                    if (!presentLeaving) exitPresentation();
+                    return;
+                  }
+                  startPresentation();
+                }}
+              >
+                <Presentation size={16} /> {presentSession ? "Salir" : "Presentar"}
               </button>
               <button type="button" className="ghost" onClick={exportJson}>
                 <FileJson size={16} /> JSON
               </button>
-              <button type="button" className="solid" onClick={exportHtml}>
-                <Download size={16} /> Exportar HTML
-              </button>
+              <ExportSplit onHtml={exportHtml} onPng={exportPng} onSvg={exportSvg} />
             </>
           ) : (
             <button type="button" className="ghost dash" onClick={loadSample}>
@@ -243,6 +542,7 @@ export function Studio() {
         </div>
       </header>
 
+      <div className="studio-stage">
       {status === "idle" || status === "error" ? (
         <main className="hero">
           <HeroWaves />
@@ -299,7 +599,7 @@ export function Studio() {
           <LoaderCircle className="spin" size={28} />
           <h2>{STEPS[step]}</h2>
           <p>{fileName}</p>
-          <p className="hint">Gemini 2.5 Flash lee el diagrama. Suele tardar unos 30–60 segundos.</p>
+          <p className="hint">Gemini 3.1 Pro lee el diagrama. Suele tardar unos 30–60 segundos.</p>
           {pages[0] ? (
             // Previews are data/blob URLs from the local PDF renderer.
             // eslint-disable-next-line @next/next/no-img-element
@@ -313,7 +613,15 @@ export function Studio() {
       ) : null}
 
       {status === "ready" && diagram ? (
-        <main className={cn("workspace", compare && pages.length > 0 && "split")}>
+        <main
+          className={cn(
+            "workspace",
+            compare && pages.length > 0 && "split",
+            presenting && "presenting",
+            presentPhase === "live" && "is-live",
+            instantCamera && "is-settling",
+          )}
+        >
           {compare && pages.length > 0 ? (
             <aside className="original">
               <p>Original</p>
@@ -334,6 +642,11 @@ export function Studio() {
                 {usedModel ? (
                   <p className="model-used">Modelo: {modelLabel(usedModel)}</p>
                 ) : null}
+                {presenting ? null : (
+                  <p className="model-used">
+                    Pasa el cursor sobre un recuadro para iluminar su ruta de flujo.
+                  </p>
+                )}
               </div>
               {diagrams.length > 1 ? (
                 <div className="tabs">
@@ -345,6 +658,8 @@ export function Studio() {
                       onClick={() => {
                         setActive(i);
                         setSelectedId(null);
+                        setPresentStep(0);
+                        setPresentPlaying(false);
                       }}
                     >
                       {d.title || `Diagrama ${i + 1}`}
@@ -356,92 +671,89 @@ export function Studio() {
             {modelNote ? <p className="model-banner">{modelNote}</p> : null}
             <div className="canvas-body">
               <DiagramCanvas
+                key={active}
                 diagram={diagram}
                 selectedId={selectedId}
+                presenting={presenting}
+                presentStep={safePresentStep}
+                overview={presentOverview}
+                cameraMode={presentCamera}
                 onSelect={setSelectedId}
+                onPresentStep={(index) => {
+                  setPresentPlaying(false);
+                  setPresentStep(index);
+                }}
+                onMove={(positions) => mutateActive((current) => applyNodePositions(current, positions))}
+                onConnectNodes={(source, target, sourceHandle, targetHandle) =>
+                  mutateActive((current) =>
+                    connectNodes(current, source, target, { sourceHandle, targetHandle }),
+                  )
+                }
+                onDeleteNodes={(ids) => {
+                  mutateActive((current) => deleteNodes(current, ids));
+                  setSelectedId((current) => (current && ids.includes(current) ? null : current));
+                }}
+                onDeleteEdges={(ids) => mutateActive((current) => deleteEdges(current, ids))}
+                onAddAt={(position) => {
+                  mutateActive((current) => {
+                    const result = addNode(current, { x: position.x, y: position.y });
+                    setSelectedId(result.id);
+                    return result.diagram;
+                  });
+                }}
               />
+              {presenting ? (
+                <PresentationBar
+                  step={safePresentStep}
+                  steps={steps}
+                  playing={presentPlaying}
+                  fullscreen={fullscreen}
+                  visible={presentPhase === "live" || presentPhase === "leave-cover"}
+                  onPrev={() => {
+                    setPresentPlaying(false);
+                    setPresentStep((value) => Math.max(0, value - 1));
+                  }}
+                  onNext={() => {
+                    setPresentPlaying(false);
+                    setPresentStep((value) => Math.min(steps.length - 1, value + 1));
+                  }}
+                  onTogglePlay={() => setPresentPlaying((value) => !value)}
+                  onRestart={() => {
+                    setPresentStep(0);
+                    setPresentPlaying(true);
+                  }}
+                  onExit={exitPresentation}
+                  onFullscreen={toggleFullscreen}
+                />
+              ) : null}
             </div>
           </section>
 
-          <aside className="inspector">
-            <p className="eyebrow">Detalle</p>
-            {selected ? (
-              <>
-                <p className="kicker">
-                  {KIND_LABEL[selected.kind]}
-                  {selected.badge ? ` · ${selected.badge}` : ""}
-                </p>
-                <h3>{selected.label}</h3>
-                <p>{selected.description || "Sin detalle adicional en el original."}</p>
-                <Connected diagram={diagram} nodeId={selected.id} onPick={setSelectedId} />
-              </>
-            ) : (
-              <>
-                <h3>Explora el diagrama</h3>
-                <p>
-                  Haz clic en un recuadro para ver su contenido. Puedes arrastrar nodos,
-                  hacer zoom y exportar un HTML independiente.
-                </p>
-                <ul className="stats">
-                  <li>
-                    <b>{diagram.nodes.length}</b> nodos
-                  </li>
-                  <li>
-                    <b>{diagram.edges.length}</b> conexiones
-                  </li>
-                  <li>
-                    <b>{diagram.groups.length}</b> carriles
-                  </li>
-                </ul>
-              </>
-            )}
-            {diagram.notes?.length ? (
-              <ol className="notes">
-                {diagram.notes.map((note) => (
-                  <li key={note}>{note}</li>
-                ))}
-              </ol>
-            ) : null}
-          </aside>
+          <DiagramEditor
+            diagram={diagram}
+            selectedId={selectedId}
+            onSelect={setSelectedId}
+            onChange={changeActive}
+            canUndo={past.length > 0}
+            canRedo={future.length > 0}
+            onUndo={undo}
+            onRedo={redo}
+          />
         </main>
       ) : null}
-    </div>
-  );
-}
 
-function Connected({
-  diagram,
-  nodeId,
-  onPick,
-}: {
-  diagram: Diagram;
-  nodeId: string;
-  onPick: (id: string) => void;
-}) {
-  const outgoing = diagram.edges.filter((e) => e.source === nodeId);
-  const incoming = diagram.edges.filter((e) => e.target === nodeId);
-  const labelOf = (id: string) => diagram.nodes.find((n) => n.id === id)?.label ?? id;
-  if (!outgoing.length && !incoming.length) return null;
-  return (
-    <div className="links">
-      {incoming.map((e) => (
-        <button key={e.id} type="button" onClick={() => onPick(e.source)}>
-          ← {labelOf(e.source)}
-        </button>
-      ))}
-      {outgoing.map((e) => (
-        <button key={e.id} type="button" onClick={() => onPick(e.target)}>
-          {e.label ? `${e.label} → ` : "→ "}
-          {labelOf(e.target)}
-        </button>
-      ))}
+      <div
+        className={cn("present-veil", presentVeilOn && "is-visible")}
+        aria-hidden="true"
+      />
+      </div>
     </div>
   );
 }
 
 function modelLabel(id: string) {
-  if (id.includes("gemini-2.5-flash-lite")) return "Gemini 2.5 Flash Lite";
-  if (id.includes("gemini-2.5-flash")) return "Gemini 2.5 Flash";
+  if (id.includes("gemini-3.1-pro")) return "Gemini 3.1 Pro";
+  if (id.includes("gemini-3.8-flash")) return "Gemini 3.8 Flash";
   if (id === "ejemplo local") return "Ejemplo local";
   return id;
 }

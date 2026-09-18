@@ -1,8 +1,18 @@
 import type { Edge, Node } from "@xyflow/react";
 import { MarkerType } from "@xyflow/react";
-import { pickHandles } from "./geometry";
+import { routeEdgeSet, staggerT, type Side } from "./geometry";
 import type { Diagram, Direction, NodeKind } from "./schema";
 import { absNodeBoxes, layoutDiagram, nodeMap, type LaidOut } from "./layout";
+
+export type NodeEmphasis =
+  | "idle"
+  | "path-up"
+  | "path-down"
+  | "path-focus"
+  | "dim"
+  | "present-current"
+  | "present-seen"
+  | "present-hidden";
 
 export type FlowData = {
   label: string;
@@ -10,6 +20,7 @@ export type FlowData = {
   kind: NodeKind | "lane";
   badge?: string;
   direction: Direction;
+  emphasis?: NodeEmphasis;
 };
 
 export type FlowNode = Node<FlowData>;
@@ -57,53 +68,79 @@ export function toFlow(diagram: Diagram, laid?: LaidOut) {
     });
   }
 
-  const edges: FlowEdge[] = diagram.edges
-    .filter((edge) => meta.has(edge.source) && meta.has(edge.target))
-    .map((edge) => {
-      const from = abs.get(edge.source);
-      const to = abs.get(edge.target);
-      const handles =
-        from && to
-          ? pickHandles(from, to, edge.fromSide, edge.toSide)
-          : { sourceHandle: "r-out", targetHandle: "l-in" };
+  const buckets = new Map<string, number>();
+  const counts = new Map<string, number>();
+  const usable = diagram.edges.filter(
+    (edge) => meta.has(edge.source) && meta.has(edge.target),
+  );
+  for (const edge of usable) {
+    const key = `${edge.source}->${edge.target}`;
+    counts.set(key, (counts.get(key) ?? 0) + 1);
+  }
+  const routedMap = routeEdgeSet(
+    [...abs.values()],
+    usable.map((edge) => {
+      const pair = `${edge.source}->${edge.target}`;
+      const total = counts.get(pair) ?? 1;
+      const index = buckets.get(pair) ?? 0;
+      buckets.set(pair, index + 1);
       return {
         id: edge.id,
         source: edge.source,
         target: edge.target,
-        sourceHandle: handles.sourceHandle,
-        targetHandle: handles.targetHandle,
-        type: "step" as const,
-        pathOptions: { borderRadius: 0, offset: 20 },
-        label: edge.label,
-        labelShowBg: true,
-        labelBgStyle: { fill: "#f4efe6" },
-        labelBgPadding: [7, 4] as [number, number],
-        labelBgBorderRadius: 4,
-        animated: edge.kind === "success",
-        className: edge.kind ?? "default",
-        markerEnd: {
-          type: MarkerType.ArrowClosed,
-          width: 16,
-          height: 16,
-          color:
-            edge.kind === "success"
-              ? "#0f6e5c"
-              : edge.kind === "warning"
-                ? "#c45c26"
-                : "#5c564c",
-        },
-        style: {
-          stroke:
-            edge.kind === "success"
-              ? "#0f6e5c"
-              : edge.kind === "warning"
-                ? "#c45c26"
-                : "#8a8174",
-          strokeWidth: 1.7,
-          strokeDasharray: edge.kind === "dashed" ? "7 6" : undefined,
-        },
+        sourceSide: edge.fromSide as Side | undefined,
+        targetSide: edge.toSide as Side | undefined,
+        startT: staggerT(index, total),
       };
-    });
+    }),
+  );
+
+  const edges: FlowEdge[] = usable.map((edge) => {
+    const routed = routedMap.get(edge.id) ?? {
+      sourceHandle: "r-out",
+      targetHandle: "l-in",
+    };
+    return {
+      id: edge.id,
+      source: edge.source,
+      target: edge.target,
+      sourceHandle: routed.sourceHandle,
+      targetHandle: routed.targetHandle,
+      type: "routed" as const,
+      data: {
+        fromSide: edge.fromSide,
+        toSide: edge.toSide,
+      },
+      label: edge.label,
+      labelShowBg: true,
+      labelBgStyle: { fill: "#f4efe6" },
+      labelBgPadding: [7, 4] as [number, number],
+      labelBgBorderRadius: 4,
+      animated: edge.kind === "success",
+      className: edge.kind ?? "default",
+      markerEnd: {
+        type: MarkerType.ArrowClosed,
+        width: 16,
+        height: 16,
+        color:
+          edge.kind === "success"
+            ? "#0f6e5c"
+            : edge.kind === "warning"
+              ? "#c45c26"
+              : "#5c564c",
+      },
+      style: {
+        stroke:
+          edge.kind === "success"
+            ? "#0f6e5c"
+            : edge.kind === "warning"
+              ? "#c45c26"
+              : "#8a8174",
+        strokeWidth: 1.7,
+        strokeDasharray: edge.kind === "dashed" ? "7 6" : undefined,
+      },
+    };
+  });
 
   return { nodes, edges, layout };
 }

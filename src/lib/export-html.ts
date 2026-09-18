@@ -1,6 +1,6 @@
-import { orthogonalPath, pickSides, staggerT, type Rect, type Side } from "./geometry";
+import { sceneFromDiagram } from "./diagram-scene";
+import { presentationSteps } from "./graph-flow";
 import type { Diagram, NodeKind } from "./schema";
-import { absNodeBoxes, layoutDiagram, type LaidOut } from "./layout";
 
 function esc(value: string) {
   return value
@@ -14,111 +14,65 @@ function kindClass(kind: NodeKind) {
   return `node kind-${kind}`;
 }
 
-export function diagramToHtml(diagram: Diagram, layout?: LaidOut) {
-  const laid = layout ?? layoutDiagram(diagram);
-  const boxById = new Map(laid.nodes.map((n) => [n.id, n]));
-  const abs = absNodeBoxes(laid);
-  const absMap = new Map(abs.map((n) => [n.id, n]));
+export function diagramToHtml(diagram: Diagram) {
+  const scene = sceneFromDiagram(diagram);
+  const stageW = scene.width;
+  const stageH = scene.height;
 
-  const maxNodeRight = Math.max(...abs.map((box) => box.x + box.w), 640);
-  const noteBoxes = (diagram.notes ?? []).map((note, index) => {
-    const w = 200;
-    const h = Math.min(140, 48 + Math.ceil(note.length / 28) * 16);
-    const x = maxNodeRight + 36;
-    const y = 48 + index * (h + 16);
-    return { note, x, y, w, h };
-  });
-
-  const stageW = Math.max(
-    laid.width,
-    ...noteBoxes.map((n) => n.x + n.w + 24),
-    960,
-  );
-  const stageH = Math.max(
-    laid.height,
-    ...noteBoxes.map((n) => n.y + n.h + 24),
-    640,
-  );
-
-  const nodesHtml = diagram.nodes
+  const nodesHtml = scene.nodes
     .map((node) => {
-      const box = absMap.get(node.id) ?? boxById.get(node.id);
-      if (!box) return "";
       const badge = node.badge
         ? `<span class="badge">${esc(node.badge)}</span>`
         : "";
-      return `<button type="button" class="${kindClass(node.kind)}" data-id="${esc(node.id)}" style="left:${box.x}px;top:${box.y}px;width:${box.w}px;height:${box.h}px">
+      return `<button type="button" class="${kindClass(node.kind)}" data-id="${esc(node.id)}" style="left:${node.x}px;top:${node.y}px;width:${node.w}px;height:${node.h}px">
         ${badge}
         <strong>${esc(node.label)}</strong>
       </button>`;
     })
     .join("");
 
-  const groupsHtml = laid.groups
+  const groupsHtml = scene.groups
     .map(
       (g) =>
         `<section class="lane" style="left:${g.x}px;top:${g.y}px;width:${g.w}px;height:${g.h}px"><h3>${esc(g.label)}</h3></section>`,
     )
     .join("");
 
-  const notesHtml = noteBoxes
+  const notesHtml = scene.notes
     .map(
       (item) =>
         `<aside class="sticky" style="left:${item.x}px;top:${item.y}px;width:${item.w}px;min-height:${item.h}px">${esc(item.note)}</aside>`,
     )
     .join("");
 
-  const edgesHtml = (() => {
-    const obstacles: Rect[] = abs;
-    const buckets = new Map<string, number>();
-    const counts = new Map<string, number>();
-    for (const edge of diagram.edges) {
-      const from = absMap.get(edge.source);
-      const to = absMap.get(edge.target);
-      if (!from || !to) continue;
-      const guessed = pickSides(from, to);
-      const source = (edge.fromSide as Side | undefined) ?? guessed.source;
-      const key = `${edge.source}:${source}`;
-      counts.set(key, (counts.get(key) ?? 0) + 1);
-    }
-
-    const placedLabels: Array<{ x: number; y: number }> = [];
-    return diagram.edges
-      .map((edge) => {
-        const from = absMap.get(edge.source);
-        const to = absMap.get(edge.target);
-        if (!from || !to) return "";
-        const guessed = pickSides(from, to);
-        const source = (edge.fromSide as Side | undefined) ?? guessed.source;
-        const target = (edge.toSide as Side | undefined) ?? guessed.target;
-        const key = `${edge.source}:${source}`;
-        const total = counts.get(key) ?? 1;
-        const index = buckets.get(key) ?? 0;
-        buckets.set(key, index + 1);
-        const routed = orthogonalPath(from, to, obstacles, {
-          source,
-          target,
-          startT: staggerT(index, total),
-        });
-        const mid = { ...routed.mid };
-        for (const other of placedLabels) {
-          if (Math.hypot(other.x - mid.x, other.y - mid.y) < 24) mid.y += 18;
-        }
-        placedLabels.push(mid);
-        const cls = edge.kind === "dashed" ? "dash" : edge.kind ?? "default";
-        const label = edge.label
-          ? (() => {
-              const width = Math.max(32, edge.label.length * 7.4 + 16);
-              return `<g class="elabel">
-          <rect x="${mid.x - width / 2}" y="${mid.y - 11}" width="${width}" height="20" rx="10"></rect>
-          <text x="${mid.x}" y="${mid.y + 4}">${esc(edge.label)}</text>
+  const edgesHtml = scene.edges
+    .map((edge) => {
+      const label = edge.label
+        ? (() => {
+            const width = Math.max(32, edge.label.length * 7.4 + 16);
+            return `<g class="elabel">
+          <rect x="${edge.mid.x - width / 2}" y="${edge.mid.y - 11}" width="${width}" height="20" rx="10"></rect>
+          <text x="${edge.mid.x}" y="${edge.mid.y + 4}">${esc(edge.label)}</text>
         </g>`;
-            })()
-          : "";
-        return `<path class="${cls}" d="${routed.d}" />${label}`;
-      })
-      .join("");
-  })();
+          })()
+        : "";
+      return `<path class="${edge.kind}" data-id="${esc(edge.id)}" data-source="${esc(edge.source)}" data-target="${esc(edge.target)}" d="${edge.d}" />${label}`;
+    })
+    .join("");
+
+  const graphJson = JSON.stringify({
+    edges: diagram.edges.map((edge) => ({
+      id: edge.id,
+      source: edge.source,
+      target: edge.target,
+    })),
+    steps: presentationSteps(diagram).map((step) => ({
+      nodeId: step.nodeId,
+      incomingEdgeIds: step.incomingEdgeIds,
+      label: step.label,
+      description: step.description ?? "",
+    })),
+  }).replaceAll("</", "<\\/");
 
   const details = diagram.nodes
     .map(
@@ -154,6 +108,10 @@ export function diagramToHtml(diagram: Diagram, layout?: LaidOut) {
     }
     .top h1 { margin: 0; font-size: 20px; font-weight: 700; letter-spacing: -0.02em; }
     .top p { margin: 4px 0 0; color: var(--muted); font-size: 12px; }
+    .top button {
+      border: 1px solid var(--line); background: #fffefb; border-radius: 999px;
+      padding: 7px 12px; cursor: pointer; font: inherit; pointer-events: auto;
+    }
     #stagewrap { width: 100%; height: 100%; overflow: hidden; cursor: grab; background:
       radial-gradient(circle at 1px 1px, #e7e0d3 1px, transparent 0) 0 0 / 22px 22px; }
     #stage { position: relative; width: ${stageW}px; height: ${stageH}px; transform-origin: 0 0; }
@@ -178,7 +136,32 @@ export function diagramToHtml(diagram: Diagram, layout?: LaidOut) {
       display: flex; flex-direction: column; justify-content: center; align-items: center;
       box-shadow: 0 1px 0 rgba(255,255,255,.8) inset, 0 8px 18px rgba(40,30,10,.06);
     }
-    .node:hover, .node.active { border-color: #0f6e5c; outline: 2px solid rgba(15,110,92,.18); }
+    .node.active { border-color: #0f6e5c; outline: 2px solid rgba(15,110,92,.18); }
+    .node.is-path-focus { border-color: #0f6e5c; outline: 4px solid rgba(15,110,92,.28); transform: scale(1.03); z-index: 3; }
+    .node.is-path-up { border-color: #0f6e5c; outline: 3px solid rgba(15,110,92,.18); }
+    .node.is-path-down { border-color: #b44a1f; outline: 3px solid rgba(180,74,31,.16); }
+    .node.is-dim { opacity: .22; filter: grayscale(.3); }
+    .node.is-present-current { border-color: #0f6e5c; outline: 4px solid rgba(15,110,92,.3); z-index: 3; }
+    .node.is-present-hidden { opacity: .12; }
+    svg.edges path.is-on-path { stroke-width: 3; }
+    svg.edges path.is-path-dim, svg.edges path.is-present-hidden { opacity: .12; }
+    svg.edges path.is-present-current { stroke: var(--yes); stroke-width: 3; }
+    .top { pointer-events: none; }
+    .top button { pointer-events: auto; }
+    #present {
+      position: absolute; left: 16px; right: 16px; bottom: 16px; z-index: 6;
+      display: none; align-items: center; justify-content: space-between; gap: 12px;
+      background: #fffefb; border: 1px solid var(--line); border-radius: 16px;
+      padding: 12px 14px; box-shadow: 0 12px 40px rgba(30,20,8,.12);
+    }
+    #present.show { display: flex; }
+    #present h2 { margin: 0; font-size: 16px; }
+    #present p { margin: 4px 0 0; color: var(--muted); font-size: 12px; }
+    #present .row { display: flex; gap: 6px; }
+    #present button {
+      border: 1px solid var(--line); background: #fff; border-radius: 999px;
+      padding: 7px 12px; cursor: pointer; font: inherit;
+    }
     .node strong {
       font-size: 13px; font-weight: 650; line-height: 1.25;
       overflow-wrap: anywhere; text-wrap: pretty;
@@ -206,6 +189,7 @@ export function diagramToHtml(diagram: Diagram, layout?: LaidOut) {
     .sticky {
       position: absolute; padding: 10px 12px; font-size: 12px; line-height: 1.4; color: #5a4e32;
     }
+    body.presenting #panel { display: none !important; }
     #panel {
       position: absolute; right: 16px; bottom: 16px; width: min(320px, 92vw);
       background: #fffefb; border: 1px solid var(--line); border-radius: 14px;
@@ -214,7 +198,7 @@ export function diagramToHtml(diagram: Diagram, layout?: LaidOut) {
     #panel h2 { margin: 0 0 6px; font-size: 16px; }
     #panel p { margin: 0; color: var(--muted); font-size: 13px; line-height: 1.45; }
     @media print {
-      #panel { display: none !important; }
+      #panel, #present, .top button { display: none !important; }
       #stagewrap { overflow: visible; }
       #stage { transform: none !important; }
     }
@@ -224,8 +208,9 @@ export function diagramToHtml(diagram: Diagram, layout?: LaidOut) {
   <div class="top">
     <div>
       <h1>${esc(diagram.title)}</h1>
-      <p>${esc(diagram.subtitle || "Diagrama reconstruido · rueda para zoom · arrastra el fondo")}</p>
+      <p>${esc(diagram.subtitle || "Pasa el cursor para ver la ruta · Presentar para explicar paso a paso")}</p>
     </div>
+    <button type="button" id="present-toggle">Presentar</button>
   </div>
   <div id="stagewrap">
     <div id="stage">
@@ -242,8 +227,21 @@ export function diagramToHtml(diagram: Diagram, layout?: LaidOut) {
       ${notesHtml}
     </div>
   </div>
+  <div id="present">
+    <div>
+      <p id="present-count">Paso 1 / 1</p>
+      <h2 id="present-title"></h2>
+      <p id="present-detail"></p>
+    </div>
+    <div class="row">
+      <button type="button" id="present-prev">Anterior</button>
+      <button type="button" id="present-play">Reproducir</button>
+      <button type="button" id="present-next">Siguiente</button>
+    </div>
+  </div>
   <div id="panel"></div>
   <div hidden id="details">${details}</div>
+  <script type="application/json" id="graph-data">${graphJson}</script>
   <script>
     const stage = document.getElementById('stage');
     const wrap = document.getElementById('stagewrap');
@@ -262,8 +260,15 @@ export function diagramToHtml(diagram: Diagram, layout?: LaidOut) {
     window.addEventListener('resize', fit);
     wrap.addEventListener('wheel', (e) => {
       e.preventDefault();
+      const rect = wrap.getBoundingClientRect();
+      const mx = e.clientX - rect.left;
+      const my = e.clientY - rect.top;
       const next = Math.min(2.4, Math.max(0.12, scale * (e.deltaY > 0 ? 0.9 : 1.1)));
-      scale = next; apply();
+      const k = next / scale;
+      x = mx - (mx - x) * k;
+      y = my - (my - y) * k;
+      scale = next;
+      apply();
     }, { passive: false });
     wrap.addEventListener('pointerdown', (e) => {
       if (e.target.closest('.node')) return;
@@ -274,11 +279,113 @@ export function diagramToHtml(diagram: Diagram, layout?: LaidOut) {
       x += e.clientX - lx; y += e.clientY - ly; lx = e.clientX; ly = e.clientY; apply();
     });
     wrap.addEventListener('pointerup', () => { drag = false; });
-    document.querySelectorAll('.node').forEach((btn) => {
+    const graph = JSON.parse(document.getElementById('graph-data').textContent || '{"edges":[],"steps":[]}');
+    const incoming = {}, outgoing = {};
+    graph.edges.forEach((edge) => {
+      (outgoing[edge.source] ||= []).push(edge);
+      (incoming[edge.target] ||= []).push(edge);
+    });
+    function walk(start, map) {
+      const seen = new Set();
+      const stack = [start];
+      while (stack.length) {
+        const id = stack.pop();
+        (map[id] || []).forEach((edge) => {
+          const next = edge.source === id ? edge.target : edge.source;
+          if (seen.has(next)) return;
+          seen.add(next);
+          stack.push(next);
+        });
+      }
+      return seen;
+    }
+    const nodeEls = [...document.querySelectorAll('.node')];
+    const pathEls = [...document.querySelectorAll('svg.edges path[data-id]')];
+    function clearMarks() {
+      nodeEls.forEach((n) => n.classList.remove('is-path-focus','is-path-up','is-path-down','is-dim','is-present-current','is-present-seen','is-present-hidden','active'));
+      pathEls.forEach((p) => p.classList.remove('is-on-path','is-path-dim','is-present-current','is-present-seen','is-present-hidden'));
+    }
+    function showPath(id) {
+      const up = walk(id, incoming);
+      const down = walk(id, outgoing);
+      const nodes = new Set([id, ...up, ...down]);
+      nodeEls.forEach((n) => {
+        const nid = n.getAttribute('data-id');
+        if (nid === id) n.classList.add('is-path-focus');
+        else if (up.has(nid)) n.classList.add('is-path-up');
+        else if (down.has(nid)) n.classList.add('is-path-down');
+        else n.classList.add('is-dim');
+      });
+      pathEls.forEach((p) => {
+        const s = p.getAttribute('data-source');
+        const t = p.getAttribute('data-target');
+        if (nodes.has(s) && nodes.has(t) && (s === id || t === id || up.has(s) || down.has(t))) p.classList.add('is-on-path');
+        else p.classList.add('is-path-dim');
+      });
+    }
+    let presenting = false, step = 0, playing = false, playTimer = 0;
+    const presentBox = document.getElementById('present');
+    const toggle = document.getElementById('present-toggle');
+    function renderPresent() {
+      const current = graph.steps[step];
+      const seen = new Set();
+      const seenEdges = new Set();
+      graph.steps.slice(0, step + 1).forEach((item) => {
+        seen.add(item.nodeId);
+        item.incomingEdgeIds.forEach((id) => seenEdges.add(id));
+      });
+      clearMarks();
+      nodeEls.forEach((n) => {
+        const nid = n.getAttribute('data-id');
+        if (current && nid === current.nodeId) n.classList.add('is-present-current');
+        else if (seen.has(nid)) n.classList.add('is-present-seen');
+        else n.classList.add('is-present-hidden');
+      });
+      pathEls.forEach((p) => {
+        const id = p.getAttribute('data-id');
+        if (current && current.incomingEdgeIds.includes(id)) p.classList.add('is-present-current');
+        else if (seenEdges.has(id)) p.classList.add('is-present-seen');
+        else p.classList.add('is-present-hidden');
+      });
+      document.getElementById('present-count').textContent = 'Paso ' + (graph.steps.length ? step + 1 : 0) + ' / ' + graph.steps.length;
+      document.getElementById('present-title').textContent = current ? current.label : '';
+      document.getElementById('present-detail').textContent = current ? current.description : '';
+    }
+    function stopPlay() { playing = false; window.clearInterval(playTimer); document.getElementById('present-play').textContent = 'Reproducir'; }
+    function setPresent(on) {
+      presenting = on;
+      document.body.classList.toggle('presenting', on);
+      presentBox.classList.toggle('show', on);
+      toggle.textContent = on ? 'Salir' : 'Presentar';
+      panel.style.display = 'none';
+      stopPlay();
+      if (on) { step = 0; renderPresent(); }
+      else clearMarks();
+    }
+    toggle.addEventListener('click', () => setPresent(!presenting));
+    document.getElementById('present-prev').addEventListener('click', () => { stopPlay(); step = Math.max(0, step - 1); renderPresent(); });
+    document.getElementById('present-next').addEventListener('click', () => { stopPlay(); step = Math.min(graph.steps.length - 1, step + 1); renderPresent(); });
+    document.getElementById('present-play').addEventListener('click', () => {
+      if (playing) { stopPlay(); return; }
+      playing = true;
+      document.getElementById('present-play').textContent = 'Pausa';
+      playTimer = window.setInterval(() => {
+        if (step >= graph.steps.length - 1) { stopPlay(); return; }
+        step += 1; renderPresent();
+      }, 2200);
+    });
+    nodeEls.forEach((btn) => {
+      btn.addEventListener('mouseenter', () => { if (!presenting) showPath(btn.getAttribute('data-id')); });
+      btn.addEventListener('mouseleave', () => { if (!presenting) clearMarks(); });
       btn.addEventListener('click', () => {
+        const id = btn.getAttribute('data-id');
+        if (presenting) {
+          const index = graph.steps.findIndex((item) => item.nodeId === id);
+          if (index >= 0) { stopPlay(); step = index; renderPresent(); }
+          return;
+        }
         document.querySelectorAll('.node').forEach((n) => n.classList.remove('active'));
         btn.classList.add('active');
-        const id = btn.getAttribute('data-id');
         const article = document.querySelector('[data-detail="'+id+'"]');
         panel.innerHTML = article ? article.innerHTML : '';
         panel.style.display = 'block';
