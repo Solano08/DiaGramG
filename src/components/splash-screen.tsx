@@ -7,7 +7,7 @@ import { cn } from "@/lib/cn";
 export const SPLASH_MS = 1600;
 const SPLASH_COVER_MS = 610;
 
-export type SplashMode = "enter" | "leave";
+export type SplashMode = "enter" | "leave" | "leave-down";
 
 export function SplashScreen({
   mode = "enter",
@@ -17,27 +17,32 @@ export function SplashScreen({
   onCovered?: () => void;
 }) {
   const [visible, setVisible] = useState(true);
+  const leaving = mode === "leave" || mode === "leave-down";
 
   useEffect(() => {
     const reduce = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
     const hide = window.setTimeout(() => setVisible(false), reduce ? 300 : SPLASH_MS);
     const cover =
-      mode === "leave" && onCovered
+      leaving && onCovered
         ? window.setTimeout(() => onCovered(), reduce ? 0 : SPLASH_COVER_MS)
         : 0;
     return () => {
       window.clearTimeout(hide);
       if (cover) window.clearTimeout(cover);
     };
-  }, [mode, onCovered]);
+  }, [leaving, onCovered]);
 
   if (!visible) return null;
 
   return (
     <>
-      {mode === "leave" ? <div className="splash-block" aria-hidden="true" /> : null}
+      {leaving ? <div className="splash-block" aria-hidden="true" /> : null}
       <div
-        className={cn("splash", mode === "leave" && "splash-leave")}
+        className={cn(
+          "splash",
+          mode === "leave" && "splash-leave",
+          mode === "leave-down" && "splash-leave-down",
+        )}
         role="status"
         aria-live="polite"
         aria-label="Cargando DiaGramG"

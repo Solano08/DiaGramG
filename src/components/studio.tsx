@@ -13,6 +13,7 @@ import {
   Upload,
 } from "lucide-react";
 import { SAMPLE_DIAGRAM } from "@/lib/sample";
+import type { DiagramScene } from "@/lib/diagram-scene";
 import { diagramToHtml, downloadTextFile } from "@/lib/export-html";
 import { diagramToSvg, downloadPngFile, downloadSvgFile } from "@/lib/export-image";
 import {
@@ -124,6 +125,10 @@ export function Studio() {
   const diagramsRef = useRef(diagrams);
   const activeRef = useRef(active);
   const draftStart = useRef<Diagram[] | null>(null);
+  const exportSceneRef = useRef<(() => DiagramScene) | null>(null);
+  const bindExport = useCallback((fn: (() => DiagramScene) | null) => {
+    exportSceneRef.current = fn;
+  }, []);
   diagramsRef.current = diagrams;
   activeRef.current = active;
 
@@ -152,13 +157,32 @@ export function Studio() {
     setSplashKey((key) => key + 1);
   }, []);
 
-  const applyReset = useCallback(() => {
+  const onSplashCoveredRef = useRef<(() => void) | null>(null);
+
+  const replayLeave = useCallback(
+    (onCovered: () => void, mode: Extract<SplashMode, "leave" | "leave-down"> = "leave") => {
+      onSplashCoveredRef.current = onCovered;
+      replaySplash(mode);
+    },
+    [replaySplash],
+  );
+
+  const handleSplashCovered = useCallback(() => {
+    onSplashCoveredRef.current?.();
+    onSplashCoveredRef.current = null;
+  }, []);
+
+  const revokePages = useCallback(() => {
     setPages((prev) => {
       for (const src of prev) {
         if (src.startsWith("blob:")) URL.revokeObjectURL(src);
       }
       return [];
     });
+  }, []);
+
+  const applyReset = useCallback(() => {
+    revokePages();
     setStatus("idle");
     setError(null);
     setFileName(null);
@@ -174,15 +198,34 @@ export function Studio() {
     setPresentStep(0);
     setPresentPlaying(false);
     draftStart.current = null;
-  }, []);
+  }, [revokePages]);
+
+  const applySample = useCallback(() => {
+    revokePages();
+    setFileName("ejemplo-proceso.pdf");
+    setDiagrams([SAMPLE_DIAGRAM]);
+    setActive(0);
+    setSelectedId(null);
+    setError(null);
+    setStatus("ready");
+    setCompare(false);
+    setUsedModel("ejemplo local");
+    setModelNote(null);
+    setPast([]);
+    setFuture([]);
+    setPresentPhase("off");
+    setPresentStep(0);
+    setPresentPlaying(false);
+    draftStart.current = null;
+  }, [revokePages]);
 
   const reset = useCallback(() => {
     if (status === "ready" || status === "converting") {
-      replaySplash("leave");
+      replayLeave(applyReset, "leave-down");
       return;
     }
     applyReset();
-  }, [applyReset, replaySplash, status]);
+  }, [applyReset, replayLeave, status]);
 
   const convertFile = useCallback(async (file: File) => {
     if (!isSupportedFile(file)) {
@@ -261,24 +304,8 @@ export function Studio() {
   );
 
   const loadSample = useCallback(() => {
-    replaySplash();
-    setFileName("ejemplo-proceso.pdf");
-    setPages([]);
-    setDiagrams([SAMPLE_DIAGRAM]);
-    setActive(0);
-    setSelectedId(null);
-    setError(null);
-    setStatus("ready");
-    setCompare(false);
-    setUsedModel("ejemplo local");
-    setModelNote(null);
-    setPast([]);
-    setFuture([]);
-    setPresentPhase("off");
-    setPresentStep(0);
-    setPresentPlaying(false);
-    draftStart.current = null;
-  }, [replaySplash]);
+    replayLeave(applySample);
+  }, [applySample, replayLeave]);
 
   const applyDiagrams = useCallback((next: Diagram[]) => {
     diagramsRef.current = next;
@@ -444,12 +471,19 @@ export function Studio() {
 
   const exportPng = useCallback(() => {
     if (!diagram) return;
-    void downloadPngFile(`${slug(diagram.title)}.png`, diagramToSvg(diagram));
+    void downloadPngFile(
+      `${slug(diagram.title)}.png`,
+      diagram,
+      exportSceneRef.current?.(),
+    );
   }, [diagram]);
 
   const exportSvg = useCallback(() => {
     if (!diagram) return;
-    downloadSvgFile(`${slug(diagram.title)}.svg`, diagramToSvg(diagram));
+    downloadSvgFile(
+      `${slug(diagram.title)}.svg`,
+      diagramToSvg(diagram, undefined, exportSceneRef.current?.()),
+    );
   }, [diagram]);
 
   useEffect(() => {
@@ -505,7 +539,11 @@ export function Studio() {
       <SplashScreen
         key={splashKey}
         mode={splashMode}
-        onCovered={splashMode === "leave" ? applyReset : undefined}
+        onCovered={
+          splashMode === "leave" || splashMode === "leave-down"
+            ? handleSplashCovered
+            : undefined
+        }
       />
       <header className="topbar">
         <button type="button" className="brand" onClick={reset}>
@@ -683,6 +721,7 @@ export function Studio() {
                 presentStep={safePresentStep}
                 overview={presentOverview}
                 cameraMode={presentCamera}
+                onBindExport={bindExport}
                 onSelect={setSelectedId}
                 onPresentStep={(index) => {
                   setPresentPlaying(false);

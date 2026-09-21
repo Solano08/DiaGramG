@@ -71,6 +71,11 @@ body {
   animation-name: splash-leave-up;
 }
 
+.splash-leave-down {
+  transform: translateY(-100%);
+  animation-name: splash-leave-down;
+}
+
 .splash-block {
   position: fixed;
   inset: 0;
@@ -96,6 +101,13 @@ body {
   100% { transform: translateY(-100%); }
 }
 
+@keyframes splash-leave-down {
+  0% { transform: translateY(-100%); }
+  38% { transform: translateY(0); }
+  52% { transform: translateY(0); }
+  100% { transform: translateY(100%); }
+}
+
 @keyframes splash-logo-in {
   from { opacity: 0; transform: scale(0.96); }
   to { opacity: 1; transform: scale(1); }
@@ -103,7 +115,8 @@ body {
 
 @media (prefers-reduced-motion: reduce) {
   .splash,
-  .splash-leave {
+  .splash-leave,
+  .splash-leave-down {
     transform: none;
     animation: splash-fade 0.3s ease-out forwards;
   }
@@ -1230,6 +1243,15 @@ button.ghost.danger {
 .react-flow__handle-connecting,
 .react-flow__handle-valid {
   opacity: 1;
+}
+
+.workspace.presenting .react-flow__handle,
+.workspace.presenting .react-flow__node:hover .react-flow__handle,
+.workspace.presenting .react-flow__node.selected .react-flow__handle,
+.workspace.presenting .react-flow__handle-connecting,
+.workspace.presenting .react-flow__handle-valid {
+  opacity: 0;
+  pointer-events: none;
 }
 .react-flow__edge-textbg { fill: var(--paper); }
 .react-flow__edge-text { fill: var(--muted); font-size: 11px; }

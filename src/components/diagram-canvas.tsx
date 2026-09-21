@@ -19,6 +19,11 @@ import {
 } from "@xyflow/react";
 import type { Diagram } from "@/lib/schema";
 import {
+  readLiveEdgePaths,
+  sceneFromLive,
+  type DiagramScene,
+} from "@/lib/diagram-scene";
+import {
   pathFromNode,
   presentationSteps,
   revealedAt,
@@ -45,6 +50,7 @@ function CanvasInner({
   onDeleteNodes,
   onDeleteEdges,
   onAddAt,
+  onBindExport,
 }: {
   diagram: Diagram;
   selectedId?: string | null;
@@ -52,6 +58,7 @@ function CanvasInner({
   presentStep: number;
   overview: boolean;
   cameraMode: "overview" | "zoom" | "follow";
+  onBindExport?: (getScene: (() => DiagramScene) | null) => void;
   onSelect: (id: string | null) => void;
   onPresentStep: (index: number) => void;
   onMove: (positions: Map<string, { x: number; y: number }>) => void;
@@ -69,7 +76,7 @@ function CanvasInner({
   const flow = useMemo(() => toFlow(diagram), [diagram]);
   const [nodes, setNodes, onNodesChange] = useNodesState(flow.nodes);
   const [edges, setEdges, onEdgesChange] = useEdgesState(flow.edges);
-  const { screenToFlowPosition, fitView, getNode } = useReactFlow();
+  const { screenToFlowPosition, fitView, getNode, getNodes, getInternalNode } = useReactFlow();
   const [hoverId, setHoverId] = useState<string | null>(null);
   const leaveTimer = useRef<number>(0);
   const wasPresenting = useRef(false);
@@ -89,6 +96,28 @@ function CanvasInner({
     setNodes(flow.nodes);
     setEdges(flow.edges);
   }, [flow, setEdges, setNodes]);
+
+  const captureScene = useCallback((): DiagramScene => {
+    const liveNodes = getNodes().map((node) => {
+      const internal = getInternalNode(node.id);
+      return {
+        id: node.id,
+        type: node.type,
+        position: internal?.internals.positionAbsolute ?? node.position,
+        measured: internal?.measured ?? node.measured,
+        width: node.width,
+        height: node.height,
+        style: node.style,
+        data: node.data,
+      };
+    });
+    return sceneFromLive(diagram, liveNodes, readLiveEdgePaths());
+  }, [diagram, getInternalNode, getNodes]);
+
+  useEffect(() => {
+    onBindExport?.(captureScene);
+    return () => onBindExport?.(null);
+  }, [captureScene, onBindExport]);
 
   useEffect(() => {
     let timer = 0;
@@ -175,6 +204,7 @@ function CanvasInner({
 
   const onConnect = useCallback(
     (connection: Connection) => {
+      if (presenting) return;
       if (!connection.source || !connection.target) return;
       onConnectNodes(
         connection.source,
@@ -183,7 +213,7 @@ function CanvasInner({
         connection.targetHandle,
       );
     },
-    [onConnectNodes],
+    [onConnectNodes, presenting],
   );
 
   const clearHoverSoon = useCallback(() => {
@@ -421,6 +451,7 @@ export function DiagramCanvas(props: {
   presentStep?: number;
   overview?: boolean;
   cameraMode?: "overview" | "zoom" | "follow";
+  onBindExport?: (getScene: (() => DiagramScene) | null) => void;
   onSelect: (id: string | null) => void;
   onPresentStep?: (index: number) => void;
   onMove: (positions: Map<string, { x: number; y: number }>) => void;
@@ -444,6 +475,7 @@ export function DiagramCanvas(props: {
         presentStep={props.presentStep ?? 0}
         overview={props.overview ?? false}
         cameraMode={props.cameraMode ?? "follow"}
+        onBindExport={props.onBindExport}
         onSelect={props.onSelect}
         onPresentStep={props.onPresentStep ?? (() => {})}
         onMove={props.onMove}
